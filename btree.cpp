@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <zstd.h> // Para la compresión con zstd
+#include <zstd.h>
 #include <unordered_map>
-#include <string.h>
+#include <boost/iostreams/device/mapped_file.hpp>
+#include <boost/spirit/include/qi.hpp>
 
 using namespace std;
 using namespace std::chrono;
+namespace qi = boost::spirit::qi;
 
 #pragma pack(1)
 
@@ -26,47 +28,60 @@ struct Direccion {
 
 class Ciudadano {
 private:
-    char dni[9]; // Almacenar DNI como un array de caracteres
-    uint32_t nombre_completo; // Índice del nombre completo en el pool
+    char dni[8]; // Almacenar DNI como un array de caracteres
+    uint32_t nombres; // Índice de los nombres en el pool
+    uint32_t apellidos; // Índice de los apellidos en el pool
+    uint32_t lugar_nacimiento; // Índice del lugar de nacimiento en el pool
     Direccion direccion;
     uint64_t telefono; // Almacenar teléfono como entero sin signo
+    uint32_t correo; // Índice del correo electrónico en el pool
     char nacionalidad[2]; // Almacenar código de país (ISO 3166-1 alpha-2)
-    char sexo : 1; // Almacenar sexo como bit
-    char estado_civil : 3; // Almacenar estado civil como 3 bits (0: Soltero, 1: Casado, etc.)
+    unsigned sexo : 1; // Almacenar sexo como bit
+    unsigned estado_civil : 3; // Almacenar estado civil como 3 bits (0: Soltero, 1: Casado, etc.)
 
 public:
-    Ciudadano(const char* dni, uint32_t nombre_completo, Direccion direccion, uint64_t telefono, const char* nacionalidad, char sexo, char estado_civil)
-        : nombre_completo(nombre_completo), direccion(direccion), telefono(telefono), sexo(sexo), estado_civil(estado_civil)
+    Ciudadano(const char* dni, uint32_t nombres, uint32_t apellidos, uint32_t lugar_nacimiento, Direccion direccion, uint64_t telefono, uint32_t correo, const char* nacionalidad, unsigned sexo, unsigned estado_civil)
+        : nombres(nombres), apellidos(apellidos), lugar_nacimiento(lugar_nacimiento), direccion(direccion), telefono(telefono), correo(correo), sexo(sexo), estado_civil(estado_civil)
     {
         strncpy(this->dni, dni, 8);
-        this->dni[8] = '\0';
         strncpy(this->nacionalidad, nacionalidad, 2);
     }
 
     string getDni() const { return string(dni, 8); }
-    uint32_t getNombreCompleto() const { return nombre_completo; }
+    uint32_t getNombres() const { return nombres; }
+    uint32_t getApellidos() const { return apellidos; }
+    uint32_t getLugarNacimiento() const { return lugar_nacimiento; }
     Direccion getDireccion() const { return direccion; }
     uint64_t getTelefono() const { return telefono; }
+    uint32_t getCorreo() const { return correo; }
     string getNacionalidad() const { return string(nacionalidad, 2); }
-    char getSexo() const { return sexo; }
-    char getEstadoCivil() const { return estado_civil; }
+    unsigned getSexo() const { return sexo; }
+    unsigned getEstadoCivil() const { return estado_civil; }
 
     void serialize(ostream& os) const {
         os.write(dni, 8);
-        os.write(reinterpret_cast<const char*>(&nombre_completo), sizeof(nombre_completo));
+        os.write(reinterpret_cast<const char*>(&nombres), sizeof(nombres));
+        os.write(reinterpret_cast<const char*>(&apellidos), sizeof(apellidos));
+        os.write(reinterpret_cast<const char*>(&lugar_nacimiento), sizeof(lugar_nacimiento));
         os.write(reinterpret_cast<const char*>(&direccion), sizeof(direccion));
         os.write(reinterpret_cast<const char*>(&telefono), sizeof(telefono));
+        os.write(reinterpret_cast<const char*>(&correo), sizeof(correo));
         os.write(nacionalidad, 2);
         os.put((sexo << 3) | estado_civil);
     }
 
     static Ciudadano deserialize(istream& is) {
-        char dni[9];
+        char dni[8];
         is.read(dni, 8);
-        dni[8] = '\0';
 
-        uint32_t nombre_completo;
-        is.read(reinterpret_cast<char*>(&nombre_completo), sizeof(nombre_completo));
+        uint32_t nombres;
+        is.read(reinterpret_cast<char*>(&nombres), sizeof(nombres));
+
+        uint32_t apellidos;
+        is.read(reinterpret_cast<char*>(&apellidos), sizeof(apellidos));
+
+        uint32_t lugar_nacimiento;
+        is.read(reinterpret_cast<char*>(&lugar_nacimiento), sizeof(lugar_nacimiento));
 
         Direccion direccion;
         is.read(reinterpret_cast<char*>(&direccion), sizeof(direccion));
@@ -74,16 +89,19 @@ public:
         uint64_t telefono;
         is.read(reinterpret_cast<char*>(&telefono), sizeof(telefono));
 
+        uint32_t correo;
+        is.read(reinterpret_cast<char*>(&correo), sizeof(correo));
+
         char nacionalidad[2];
         is.read(nacionalidad, 2);
 
         char sex_and_status;
         is.get(sex_and_status);
 
-        char sexo = (sex_and_status >> 3) & 1;
-        char estado_civil = sex_and_status & 7;
+        unsigned sexo = (sex_and_status >> 3) & 1;
+        unsigned estado_civil = sex_and_status & 7;
 
-        return Ciudadano(dni, nombre_completo, direccion, telefono, nacionalidad, sexo, estado_civil);
+        return Ciudadano(dni, nombres, apellidos, lugar_nacimiento, direccion, telefono, correo, nacionalidad, sexo, estado_civil);
     }
 };
 
@@ -127,8 +145,6 @@ public:
     void serialize(const string& filename);
     void deserialize(const string& filename);
 };
-
-// Implementación de BTreeNode y Btree...
 
 BTreeNode::BTreeNode(int _t, bool _leaf) : t(_t), n(0), leaf(_leaf) {
     keys.resize(2 * t - 1);
@@ -342,10 +358,15 @@ void Btree::deserialize(const string& filename) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <filename>" << endl;
+        return 1;
+    }
+
     Btree tree(30);
 
-    // Crear un pool de cadenas para almacenar nombres y direcciones
+    // Crear un pool de cadenas para almacenar nombres, apellidos, direcciones, correos y lugares de nacimiento
     unordered_map<string, uint32_t> string_pool;
     vector<string> pool_strings; // Vector para mantener el orden de las cadenas
     uint32_t pool_index = 0;
@@ -358,15 +379,69 @@ int main() {
         return string_pool[str];
     };
 
-    // Ejemplo de datos de ciudadanos
-    for (int i = 1; i <= 33000000; ++i) {
-        string dni = to_string(i);
-        dni = string(8 - dni.size(), '0') + dni;  // Asegurar que el DNI tenga 8 dígitos
-        string nombre_completo = "Nombre" + to_string(i) + " Apellido" + to_string(i);
-        Direccion direccion = { get_pool_index("Dpto"), get_pool_index("Prov"), get_pool_index("Ciudad"), get_pool_index("Dist"), get_pool_index("Ubicacion") };
+    // Leer y descomprimir el archivo
+    string input_filename = argv[1];
+    string decompressed_filename = "decompressed_data.csv";
 
-        tree.insert(make_unique<Ciudadano>(dni.c_str(), get_pool_index(nombre_completo), direccion, 987654321, "PE", 'M', 0));
+    ifstream input_file(input_filename, ios::binary);
+    vector<char> compressed_data((istreambuf_iterator<char>(input_file)), istreambuf_iterator<char>());
+    input_file.close();
+
+    size_t uncompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
+    if (uncompressed_size == ZSTD_CONTENTSIZE_ERROR) {
+        cerr << "Error determining uncompressed size." << endl;
+        return 1;
+    } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+        cerr << "Original size unknown." << endl;
+        return 1;
     }
+
+    vector<char> uncompressed_data(uncompressed_size);
+    size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
+    if (ZSTD_isError(actual_uncompressed_size)) {
+        cerr << "Decompression error: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+        return 1;
+    }
+
+    ofstream decompressed_file(decompressed_filename, ios::binary);
+    decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
+    decompressed_file.close();
+
+    // Leer el archivo descomprimido
+    boost::iostreams::mapped_file mmap(decompressed_filename, boost::iostreams::mapped_file::readonly);
+    const char* file_data = mmap.const_data();
+    const char* file_end = file_data + mmap.size();
+
+    auto start_parse = high_resolution_clock::now();
+
+    while (file_data < file_end) {
+        const char* line_end = std::find(file_data, file_end, '\n');
+        string line(file_data, line_end);
+
+        vector<string> fields;
+        istringstream ss(line);
+        string field;
+        while (getline(ss, field, ',')) {
+            fields.push_back(field);
+        }
+
+        if (fields.size() == 10) {
+            string dni = fields[0];
+            string nombres = fields[1];
+            string apellidos = fields[2];
+            string lugar_nacimiento = fields[3];
+            Direccion direccion = { get_pool_index(fields[4]), get_pool_index(fields[5]), get_pool_index(fields[6]), get_pool_index(fields[7]), get_pool_index(fields[8]) };
+            string correo = fields[9];
+
+            tree.insert(make_unique<Ciudadano>(dni.c_str(), get_pool_index(nombres), get_pool_index(apellidos), get_pool_index(lugar_nacimiento), direccion, 987654321, get_pool_index(correo), "PE", 0, 0));
+        }
+
+        file_data = line_end + 1;
+    }
+
+    auto stop_parse = high_resolution_clock::now();
+    auto duration = duration_cast<milliseconds>(stop_parse - start_parse);
+    cout << "Time taken by parsing: " << duration.count() / 1000.0 << "s\n";
 
     // Serializar el árbol en disco
     tree.serialize("btreenew.bin");
@@ -382,7 +457,9 @@ int main() {
         };
 
         cout << "\nDNI: " << found->getDni() << endl;
-        cout << "Nombre Completo: " << get_string_from_pool(found->getNombreCompleto()) << endl;
+        cout << "Nombres: " << get_string_from_pool(found->getNombres()) << endl;
+        cout << "Apellidos: " << get_string_from_pool(found->getApellidos()) << endl;
+        cout << "Lugar de Nacimiento: " << get_string_from_pool(found->getLugarNacimiento()) << endl;
         Direccion dir = found->getDireccion();
         cout << "Direccion: " << get_string_from_pool(dir.departamento) << ", "
              << get_string_from_pool(dir.provincia) << ", "
@@ -390,6 +467,7 @@ int main() {
              << get_string_from_pool(dir.distrito) << ", "
              << get_string_from_pool(dir.ubicacion) << endl;
         cout << "Telefono: " << found->getTelefono() << endl;
+        cout << "Correo: " << get_string_from_pool(found->getCorreo()) << endl;
         cout << "Nacionalidad: " << found->getNacionalidad() << endl;
         cout << "Sexo: " << (found->getSexo() == 0 ? "Masculino" : "Femenino") << endl;
         cout << "Estado Civil: " << (found->getEstadoCivil() == 0 ? "Soltero" : "Casado") << endl;
