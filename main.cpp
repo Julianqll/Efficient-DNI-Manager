@@ -590,7 +590,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                BTreeManager::loadFile("dataFiles/data.zst", tree);
+                BTreeManager::loadFile("/app/data/data.zst", tree);
                 response.send(Http::Code::Ok, "Data descomprimida e insertada");
             }
         }
@@ -598,7 +598,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.serialize("dataFiles/btreebinary.bin");
+                tree.serialize("/app/data/btreebinary.bin");
                 response.send(Http::Code::Ok, "Data guardada en archivo");
             }
         }
@@ -606,7 +606,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.deserialize("dataFiles/btreenew.bin");
+                tree.deserialize("/app/data/btreebinary.bin");
                 response.send(Http::Code::Ok, "Data importada correctamente");
             }
         }
@@ -642,7 +642,7 @@ class MyHandler : public Http::Handler
 
 int main(int argc, char* argv[])
 {
-    Port port(5001);
+    Port port(5000);
 
     int thr = 10;
 
