@@ -590,7 +590,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                BTreeManager::loadFile("data.zst", tree);
+                BTreeManager::loadFile("dataFiles/data.zst", tree);
                 response.send(Http::Code::Ok, "Data descomprimida e insertada");
             }
         }
@@ -598,7 +598,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.serialize("btreebinary.bin");
+                tree.serialize("dataFiles/btreebinary.bin");
                 response.send(Http::Code::Ok, "Data guardada en archivo");
             }
         }
@@ -606,7 +606,7 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.deserialize("btreenew.bin");
+                tree.deserialize("dataFiles/btreenew.bin");
                 response.send(Http::Code::Ok, "Data importada correctamente");
             }
         }
