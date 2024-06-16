@@ -602,6 +602,28 @@ class MyHandler : public Http::Handler
                 response.send(Http::Code::Ok, "Data guardada en archivo");
             }
         }
+        if (req.resource() == "/open")
+        {
+            if (req.method() == Http::Method::Get)
+            {
+                tree.deserialize("btreenew.bin");
+                response.send(Http::Code::Ok, "Data importada correctamente");
+            }
+        }
+        if (req.resource() == "/search")
+        {
+            if (req.method() == Http::Method::Get)
+            {
+                string dniSearch;
+                const auto& query = req.query();
+                if (query.get("dni").has_value())
+                {
+                    dniSearch = query.get("dni").value();
+                }
+                BTreeManager::searchDNI(tree, dniSearch);
+                response.send(Http::Code::Ok, "Completado");
+            }
+        }
         else
         {
             response.send(Http::Code::Not_Found);
