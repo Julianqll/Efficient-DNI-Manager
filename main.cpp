@@ -594,6 +594,14 @@ class MyHandler : public Http::Handler
                 response.send(Http::Code::Ok, "Data descomprimida e insertada");
             }
         }
+        if (req.resource() == "/save")
+        {
+            if (req.method() == Http::Method::Get)
+            {
+                tree.serialize("btreebinary.bin");
+                response.send(Http::Code::Ok, "Data guardada en archivo");
+            }
+        }
         else
         {
             response.send(Http::Code::Not_Found);
@@ -612,9 +620,9 @@ class MyHandler : public Http::Handler
 
 int main(int argc, char* argv[])
 {
-    Port port(5000);
+    Port port(5001);
 
-    int thr = 2;
+    int thr = 10;
 
     if (argc >= 2)
     {
