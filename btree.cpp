@@ -19,25 +19,25 @@ namespace qi = boost::spirit::qi;
 #pragma pack(1)
 
 struct Direccion {
-    uint32_t departamento; // Índice del departamento en el pool
-    uint32_t provincia; // Índice de la provincia en el pool
-    uint32_t ciudad; // Índice de la ciudad en el pool
-    uint32_t distrito; // Índice del distrito en el pool
-    uint32_t ubicacion; // Índice de la ubicación en el pool
+    uint32_t departamento;
+    uint32_t provincia;
+    uint32_t ciudad;
+    uint32_t distrito;
+    uint32_t ubicacion;
 };
 
 class Ciudadano {
 private:
-    char dni[8]; // Almacenar DNI como un array de caracteres
-    uint32_t nombres; // Índice de los nombres en el pool
-    uint32_t apellidos; // Índice de los apellidos en el pool
-    uint32_t lugar_nacimiento; // Índice del lugar de nacimiento en el pool
+    char dni[8];
+    uint32_t nombres;
+    uint32_t apellidos;
+    uint32_t lugar_nacimiento;
     Direccion direccion;
-    uint64_t telefono; // Almacenar teléfono como entero sin signo
-    uint32_t correo; // Índice del correo electrónico en el pool
-    char nacionalidad[2]; // Almacenar código de país (ISO 3166-1 alpha-2)
-    unsigned sexo : 1; // Almacenar sexo como bit
-    unsigned estado_civil : 3; // Almacenar estado civil como 3 bits (0: Soltero, 1: Casado, etc.)
+    uint64_t telefono;
+    uint32_t correo;
+    char nacionalidad[2];
+    unsigned sexo : 1;
+    unsigned estado_civil : 3;
 
 public:
     Ciudadano(const char* dni, uint32_t nombres, uint32_t apellidos, uint32_t lugar_nacimiento, Direccion direccion, uint64_t telefono, uint32_t correo, const char* nacionalidad, unsigned sexo, unsigned estado_civil)
@@ -116,12 +116,12 @@ private:
 public:
     BTreeNode(int _t, bool _leaf);
 
-    void traverse();
+    void traverse() const;
     void splitChild(int i, BTreeNode* y);
     void insertNonFull(unique_ptr<Ciudadano>&& citizen);
-    Ciudadano* search(const string& dni);
+    Ciudadano* search(const string& dni) const;
 
-    void serialize(ostringstream& buffer);
+    void serialize(ostringstream& buffer) const;
     void deserialize(istringstream& buffer);
     friend class Btree;
 };
@@ -130,20 +130,37 @@ class Btree {
 private:
     unique_ptr<BTreeNode> root;
     int t;
+    unordered_map<string, uint32_t> string_pool;
+    vector<string> pool_strings;
 
 public:
     Btree(int _t) : root(nullptr), t(_t) {}
 
-    void traverse() {
+    void traverse() const {
         if (root)
             root->traverse();
     }
 
     void insert(unique_ptr<Ciudadano>&& citizen);
-    Ciudadano* search(const string& dni);
+    Ciudadano* search(const string& dni) const;
 
-    void serialize(const string& filename);
+    void serialize(const string& filename) const;
     void deserialize(const string& filename);
+
+    void serialize_string_pool(ostringstream& buffer) const;
+    void deserialize_string_pool(istringstream& buffer);
+
+    string get_string_from_pool(uint32_t index) const {
+        return pool_strings[index];
+    }
+
+    uint32_t get_pool_index(const string& str) {
+        if (string_pool.find(str) == string_pool.end()) {
+            string_pool[str] = pool_strings.size();
+            pool_strings.push_back(str);
+        }
+        return string_pool[str];
+    }
 };
 
 BTreeNode::BTreeNode(int _t, bool _leaf) : t(_t), n(0), leaf(_leaf) {
@@ -151,7 +168,7 @@ BTreeNode::BTreeNode(int _t, bool _leaf) : t(_t), n(0), leaf(_leaf) {
     children.resize(2 * t);
 }
 
-void BTreeNode::traverse() {
+void BTreeNode::traverse() const {
     int i;
     for (i = 0; i < n; i++) {
         if (!leaf)
@@ -212,7 +229,7 @@ void BTreeNode::splitChild(int i, BTreeNode* y) {
     n++;
 }
 
-void BTreeNode::serialize(ostringstream& buffer) {
+void BTreeNode::serialize(ostringstream& buffer) const {
     buffer.write(reinterpret_cast<const char*>(&n), sizeof(int));
     buffer.write(reinterpret_cast<const char*>(&leaf), sizeof(bool));
     for (int i = 0; i < n; i++) {
@@ -265,7 +282,7 @@ void Btree::insert(unique_ptr<Ciudadano>&& citizen) {
     }
 }
 
-Ciudadano* BTreeNode::search(const string& dni) {
+Ciudadano* BTreeNode::search(const string& dni) const {
     int i = 0;
     while (i < n && dni > keys[i]->getDni())
         i++;
@@ -279,7 +296,7 @@ Ciudadano* BTreeNode::search(const string& dni) {
     return children[i]->search(dni);
 }
 
-Ciudadano* Btree::search(const string& dni) {
+Ciudadano* Btree::search(const string& dni) const {
     if (!root) {
         cout << "Tree is empty" << endl;
         return nullptr;
@@ -287,22 +304,45 @@ Ciudadano* Btree::search(const string& dni) {
     return root->search(dni);
 }
 
-void Btree::serialize(const string& filename) {
+void Btree::serialize_string_pool(ostringstream& buffer) const {
+    uint32_t pool_size = pool_strings.size();
+    buffer.write(reinterpret_cast<const char*>(&pool_size), sizeof(pool_size));
+    for (const auto& str : pool_strings) {
+        uint32_t str_size = str.size();
+        buffer.write(reinterpret_cast<const char*>(&str_size), sizeof(str_size));
+        buffer.write(str.data(), str_size);
+    }
+}
+
+void Btree::deserialize_string_pool(istringstream& buffer) {
+    uint32_t pool_size;
+    buffer.read(reinterpret_cast<char*>(&pool_size), sizeof(pool_size));
+    pool_strings.resize(pool_size);
+    for (uint32_t i = 0; i < pool_size; ++i) {
+        uint32_t str_size;
+        buffer.read(reinterpret_cast<char*>(&str_size), sizeof(str_size));
+        string str(str_size, '\0');
+        buffer.read(&str[0], str_size);
+        pool_strings[i] = str;
+        string_pool[str] = i;
+    }
+}
+
+void Btree::serialize(const string& filename) const {
     ostringstream buffer;
     if (root) {
         auto start = high_resolution_clock::now();
         root->serialize(buffer);
+        serialize_string_pool(buffer);
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end - start);
         cout << "B-Tree serialized to buffer in " << duration.count() << " milliseconds." << endl;
 
-        // Compresión
         string uncompressed_data = buffer.str();
         size_t compressed_size = ZSTD_compressBound(uncompressed_data.size());
         vector<char> compressed_data(compressed_size);
         size_t actual_compressed_size = ZSTD_compress(compressed_data.data(), compressed_size, uncompressed_data.data(), uncompressed_data.size(), 1);
 
-        // Escritura en archivo
         ofstream file(filename, ios::binary | ios::out);
         if (file.is_open()) {
             file.write(compressed_data.data(), actual_compressed_size);
@@ -347,6 +387,7 @@ void Btree::deserialize(const string& filename) {
         istringstream buffer(string(uncompressed_data.data(), actual_uncompressed_size));
         root = make_unique<BTreeNode>(t, true);
         root->deserialize(buffer);
+        deserialize_string_pool(buffer);
 
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end - start);
@@ -358,6 +399,109 @@ void Btree::deserialize(const string& filename) {
     }
 }
 
+class BTreeManager {
+public:
+    static void loadFile(const string& input_filename, Btree& tree) {
+        string decompressed_filename = "decompressed_data.csv";
+
+        ifstream input_file(input_filename, ios::binary);
+        if (!input_file) {
+            cerr << "Error opening input file." << endl;
+            exit(1);
+        }
+
+        vector<char> compressed_data((istreambuf_iterator<char>(input_file)), istreambuf_iterator<char>());
+        input_file.close();
+
+        size_t uncompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
+        if (uncompressed_size == ZSTD_CONTENTSIZE_ERROR) {
+            cerr << "Error determining uncompressed size." << endl;
+            exit(1);
+        } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+            cerr << "Original size unknown." << endl;
+            exit(1);
+        }
+
+        vector<char> uncompressed_data(uncompressed_size);
+        size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
+        if (ZSTD_isError(actual_uncompressed_size)) {
+            cerr << "Decompression error: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+            exit(1);
+        }
+
+        ofstream decompressed_file(decompressed_filename, ios::binary);
+        if (!decompressed_file) {
+            cerr << "Error opening decompressed file for writing." << endl;
+            exit(1);
+        }
+        decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
+        decompressed_file.close();
+
+        boost::iostreams::mapped_file mmap(decompressed_filename, boost::iostreams::mapped_file::readonly);
+        if (!mmap.is_open()) {
+            cerr << "Error mapping decompressed file." << endl;
+            exit(1);
+        }
+
+        const char* file_data = mmap.const_data();
+        const char* file_end = file_data + mmap.size();
+
+        auto start_parse = high_resolution_clock::now();
+
+        while (file_data < file_end) {
+            const char* line_end = std::find(file_data, file_end, '\n');
+            string line(file_data, line_end);
+
+            vector<string> fields;
+            istringstream ss(line);
+            string field;
+            while (getline(ss, field, ',')) {
+                fields.push_back(field);
+            }
+
+            if (fields.size() == 10) {
+                string dni = fields[0];
+                string nombres = fields[1];
+                string apellidos = fields[2];
+                string lugar_nacimiento = fields[3];
+                Direccion direccion = { tree.get_pool_index(fields[4]), tree.get_pool_index(fields[5]), tree.get_pool_index(fields[6]), tree.get_pool_index(fields[7]), tree.get_pool_index(fields[8]) };
+                string correo = fields[9];
+
+                tree.insert(make_unique<Ciudadano>(dni.c_str(), tree.get_pool_index(nombres), tree.get_pool_index(apellidos), tree.get_pool_index(lugar_nacimiento), direccion, 987654321, tree.get_pool_index(correo), "PE", 0, 0));
+            }
+
+            file_data = line_end + 1;
+        }
+
+        auto stop_parse = high_resolution_clock::now();
+        auto duration = duration_cast<milliseconds>(stop_parse - start_parse);
+        cout << "Time taken by parsing: " << duration.count() / 1000.0 << "s\n";
+    }
+
+    static void searchDNI(const Btree& tree, const string& dniToSearch) {
+        const Ciudadano* found = tree.search(dniToSearch);
+        if (found) {
+            cout << "\nDNI: " << found->getDni() << endl;
+            cout << "Nombres: " << tree.get_string_from_pool(found->getNombres()) << endl;
+            cout << "Apellidos: " << tree.get_string_from_pool(found->getApellidos()) << endl;
+            cout << "Lugar de Nacimiento: " << tree.get_string_from_pool(found->getLugarNacimiento()) << endl;
+            Direccion dir = found->getDireccion();
+            cout << "Direccion: " << tree.get_string_from_pool(dir.departamento) << ", "
+                << tree.get_string_from_pool(dir.provincia) << ", "
+                << tree.get_string_from_pool(dir.ciudad) << ", "
+                << tree.get_string_from_pool(dir.distrito) << ", "
+                << tree.get_string_from_pool(dir.ubicacion) << endl;
+            cout << "Telefono: " << found->getTelefono() << endl;
+            cout << "Correo: " << tree.get_string_from_pool(found->getCorreo()) << endl;
+            cout << "Nacionalidad: " << found->getNacionalidad() << endl;
+            cout << "Sexo: " << (found->getSexo() == 0 ? "Masculino" : "Femenino") << endl;
+            cout << "Estado Civil: " << (found->getEstadoCivil() == 0 ? "Soltero" : "Casado") << endl;
+        } else {
+            cout << "\nDNI " << dniToSearch << " no encontrado." << endl;
+        }
+    }
+};
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         cerr << "Usage: " << argv[0] << " <filename>" << endl;
@@ -366,114 +510,18 @@ int main(int argc, char** argv) {
 
     Btree tree(30);
 
-    // Crear un pool de cadenas para almacenar nombres, apellidos, direcciones, correos y lugares de nacimiento
-    unordered_map<string, uint32_t> string_pool;
-    vector<string> pool_strings; // Vector para mantener el orden de las cadenas
-    uint32_t pool_index = 0;
-
-    auto get_pool_index = [&](const string& str) {
-        if (string_pool.find(str) == string_pool.end()) {
-            string_pool[str] = pool_index++;
-            pool_strings.push_back(str);
-        }
-        return string_pool[str];
-    };
-
-    // Leer y descomprimir el archivo
-    string input_filename = argv[1];
-    string decompressed_filename = "decompressed_data.csv";
-
-    ifstream input_file(input_filename, ios::binary);
-    vector<char> compressed_data((istreambuf_iterator<char>(input_file)), istreambuf_iterator<char>());
-    input_file.close();
-
-    size_t uncompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
-    if (uncompressed_size == ZSTD_CONTENTSIZE_ERROR) {
-        cerr << "Error determining uncompressed size." << endl;
-        return 1;
-    } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-        cerr << "Original size unknown." << endl;
-        return 1;
-    }
-
-    vector<char> uncompressed_data(uncompressed_size);
-    size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
-    if (ZSTD_isError(actual_uncompressed_size)) {
-        cerr << "Decompression error: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
-        return 1;
-    }
-
-    ofstream decompressed_file(decompressed_filename, ios::binary);
-    decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
-    decompressed_file.close();
-
-    // Leer el archivo descomprimido
-    boost::iostreams::mapped_file mmap(decompressed_filename, boost::iostreams::mapped_file::readonly);
-    const char* file_data = mmap.const_data();
-    const char* file_end = file_data + mmap.size();
-
-    auto start_parse = high_resolution_clock::now();
-
-    while (file_data < file_end) {
-        const char* line_end = std::find(file_data, file_end, '\n');
-        string line(file_data, line_end);
-
-        vector<string> fields;
-        istringstream ss(line);
-        string field;
-        while (getline(ss, field, ',')) {
-            fields.push_back(field);
-        }
-
-        if (fields.size() == 10) {
-            string dni = fields[0];
-            string nombres = fields[1];
-            string apellidos = fields[2];
-            string lugar_nacimiento = fields[3];
-            Direccion direccion = { get_pool_index(fields[4]), get_pool_index(fields[5]), get_pool_index(fields[6]), get_pool_index(fields[7]), get_pool_index(fields[8]) };
-            string correo = fields[9];
-
-            tree.insert(make_unique<Ciudadano>(dni.c_str(), get_pool_index(nombres), get_pool_index(apellidos), get_pool_index(lugar_nacimiento), direccion, 987654321, get_pool_index(correo), "PE", 0, 0));
-        }
-
-        file_data = line_end + 1;
-    }
-
-    auto stop_parse = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(stop_parse - start_parse);
-    cout << "Time taken by parsing: " << duration.count() / 1000.0 << "s\n";
+    // Cargar y descomprimir el archivo, insertar los datos en el árbol B
+    //BTreeManager::loadFile(argv[1], tree);
 
     // Serializar el árbol en disco
-    tree.serialize("btreenew.bin");
+    //tree.serialize("btreenew.bin");
 
     // Deserializar el árbol desde disco
     tree.deserialize("btreenew.bin");
 
-    string dniToSearch = "30000000";
-    Ciudadano* found = tree.search(dniToSearch);
-    if (found) {
-        auto get_string_from_pool = [&](uint32_t index) -> string {
-            return pool_strings[index];
-        };
-
-        cout << "\nDNI: " << found->getDni() << endl;
-        cout << "Nombres: " << get_string_from_pool(found->getNombres()) << endl;
-        cout << "Apellidos: " << get_string_from_pool(found->getApellidos()) << endl;
-        cout << "Lugar de Nacimiento: " << get_string_from_pool(found->getLugarNacimiento()) << endl;
-        Direccion dir = found->getDireccion();
-        cout << "Direccion: " << get_string_from_pool(dir.departamento) << ", "
-             << get_string_from_pool(dir.provincia) << ", "
-             << get_string_from_pool(dir.ciudad) << ", "
-             << get_string_from_pool(dir.distrito) << ", "
-             << get_string_from_pool(dir.ubicacion) << endl;
-        cout << "Telefono: " << found->getTelefono() << endl;
-        cout << "Correo: " << get_string_from_pool(found->getCorreo()) << endl;
-        cout << "Nacionalidad: " << found->getNacionalidad() << endl;
-        cout << "Sexo: " << (found->getSexo() == 0 ? "Masculino" : "Femenino") << endl;
-        cout << "Estado Civil: " << (found->getEstadoCivil() == 0 ? "Soltero" : "Casado") << endl;
-    } else {
-        cout << "\nDNI " << dniToSearch << " no encontrado." << endl;
-    }
+    // Buscar un DNI específico (por ejemplo, "30000000")
+    string dniToSearch = "00000000";
+    BTreeManager::searchDNI(tree, dniToSearch);
 
     return 0;
 }
