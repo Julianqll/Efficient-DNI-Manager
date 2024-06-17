@@ -12,7 +12,11 @@ git clone https://github.com/Julianqll/edavProyectoBackend
 ```bash
 cd edavProyectoBackend
 ```
-3. Ejecuta el contenedor
+3. Construir la imagen
+```docker
+docker build -t edav-api .
+```
+4. Ejecutar en el contenedor
 ```docker
 docker run -d -p 5000:5000 -v ./dataFiles:/app/data edav-api
 ```
