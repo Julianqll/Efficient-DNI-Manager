@@ -344,7 +344,7 @@ bool Btree::serialize(const string& filename) const {
         serialize_string_pool(buffer);
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end - start);
-        cout << "B-Tree serialized to buffer in " << duration.count() << " milliseconds." << endl;
+        cout << "B-Tree serializado en buffer en " << duration.count() << " milisegundos." << endl;
 
         string uncompressed_data = buffer.str();
         size_t compressed_size = ZSTD_compressBound(uncompressed_data.size());
@@ -355,14 +355,14 @@ bool Btree::serialize(const string& filename) const {
         if (file.is_open()) {
             file.write(compressed_data.data(), actual_compressed_size);
             file.close();
-            cout << "B-Tree serialized and compressed to file successfully." << endl;
+            cout << "B-Tree serializado and comprimido en archivo con exito." << endl;
             return true;
         } else {
-            cerr << "Error opening file for serialization." << endl;
+            cerr << "Error abriendo archivo para serializacion." << endl;
             return false;
         }
     } else {
-        cerr << "Tree is empty." << endl;
+        cerr << "B-Tree está vacío." << endl;
         return false;
     }
 }
