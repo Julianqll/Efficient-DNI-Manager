@@ -412,6 +412,40 @@ bool Btree::deserialize(const string& filename) {
     }
 }
 
+// Función para eliminar caracteres de control no deseados como \r
+std::string clean_string(const std::string& input) {
+    std::string output;
+    std::remove_copy_if(input.begin(), input.end(), std::back_inserter(output), [](char c) {
+        return c == '\r';  // Puedes agregar más caracteres no deseados aquí si es necesario
+    });
+    return output;
+}
+
+// Función para escapar caracteres en una cadena para JSON
+std::string escape_json(const std::string& input) {
+    std::string cleaned = clean_string(input);
+    std::string output;
+    output.reserve(cleaned.length());
+    for (char c : cleaned) {
+        switch (c) {
+        case '"':  output += "\\\""; break;
+        case '\\': output += "\\\\"; break;
+        case '\b': output += "\\b"; break;
+        case '\f': output += "\\f"; break;
+        case '\n': output += "\\n"; break;
+        case '\r': output += "\\r"; break;
+        case '\t': output += "\\t"; break;
+        default:
+            if ('\x00' <= c && c <= '\x1f') {
+                output += "\\u" + std::to_string(c);
+            } else {
+                output += c;
+            }
+        }
+    }
+    return output;
+}
+
 class BTreeManager {
 public:
     static bool loadFile(const string& input_filename, Btree& tree) {
@@ -492,27 +526,36 @@ public:
         return true;
     }
 
-    static void searchDNI(const Btree& tree, const string& dniToSearch) {
+    static string searchDNI(const Btree& tree, const string& dniToSearch) {
         const Ciudadano* found = tree.search(dniToSearch);
+        std::string jsonResult = "{";
+
         if (found) {
-            cout << "\nDNI: " << found->getDni() << endl;
-            cout << "Nombres: " << tree.get_string_from_pool(found->getNombres()) << endl;
-            cout << "Apellidos: " << tree.get_string_from_pool(found->getApellidos()) << endl;
-            cout << "Lugar de Nacimiento: " << tree.get_string_from_pool(found->getLugarNacimiento()) << endl;
+            jsonResult += "\"DNI\": \"" + escape_json(found->getDni()) + "\",";
+            jsonResult += "\"Nombres\": \"" + escape_json(tree.get_string_from_pool(found->getNombres())) + "\",";
+            jsonResult += "\"Apellidos\": \"" + escape_json(tree.get_string_from_pool(found->getApellidos())) + "\",";
+            jsonResult += "\"Lugar de Nacimiento\": \"" + escape_json(tree.get_string_from_pool(found->getLugarNacimiento())) + "\",";
+            
             Direccion dir = found->getDireccion();
-            cout << "Direccion: " << tree.get_string_from_pool(dir.departamento) << ", "
-                << tree.get_string_from_pool(dir.provincia) << ", "
-                << tree.get_string_from_pool(dir.ciudad) << ", "
-                << tree.get_string_from_pool(dir.distrito) << ", "
-                << tree.get_string_from_pool(dir.ubicacion) << endl;
-            cout << "Telefono: " << found->getTelefono() << endl;
-            cout << "Correo: " << tree.get_string_from_pool(found->getCorreo()) << endl;
-            cout << "Nacionalidad: " << found->getNacionalidad() << endl;
-            cout << "Sexo: " << (found->getSexo() == 0 ? "Masculino" : "Femenino") << endl;
-            cout << "Estado Civil: " << (found->getEstadoCivil() == 0 ? "Soltero" : "Casado") << endl;
+            jsonResult += "\"Direccion\": {";
+            jsonResult += "\"Departamento\": \"" + escape_json(tree.get_string_from_pool(dir.departamento)) + "\",";
+            jsonResult += "\"Provincia\": \"" + escape_json(tree.get_string_from_pool(dir.provincia)) + "\",";
+            jsonResult += "\"Ciudad\": \"" + escape_json(tree.get_string_from_pool(dir.ciudad)) + "\",";
+            jsonResult += "\"Distrito\": \"" + escape_json(tree.get_string_from_pool(dir.distrito)) + "\",";
+            jsonResult += "\"Ubicacion\": \"" + escape_json(tree.get_string_from_pool(dir.ubicacion)) + "\"";
+            jsonResult += "},"; // Cierra el objeto Dirección
+            
+            jsonResult += "\"Telefono\": \"" + escape_json(std::to_string(found->getTelefono())) + "\",";
+            jsonResult += "\"Correo\": \"" + escape_json(tree.get_string_from_pool(found->getCorreo())) + "\",";
+            jsonResult += "\"Nacionalidad\": \"" + escape_json(found->getNacionalidad()) + "\",";
+            jsonResult += "\"Sexo\": \"" + escape_json(found->getSexo() == 0 ? "Masculino" : "Femenino") + "\",";
+            jsonResult += "\"Estado Civil\": \"" + escape_json(found->getEstadoCivil() == 0 ? "Soltero" : "Casado") + "\"";
         } else {
-            cout << "\nDNI " << dniToSearch << " no encontrado." << endl;
+            jsonResult += "\"error\": \"DNI " + escape_json(dniToSearch) + " no encontrado.\"";
         }
+
+        jsonResult += "}";
+        return jsonResult;
     }
 };
 
@@ -662,14 +705,21 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                string dniSearch;
-                const auto& query = req.query();
-                if (query.get("dni").has_value())
+                try
                 {
-                    dniSearch = query.get("dni").value();
+                    string dniSearch;
+                    const auto& query = req.query();
+                    if (query.get("dni").has_value())
+                    {
+                        dniSearch = query.get("dni").value();
+                    }
+                    string result = BTreeManager::searchDNI(tree, dniSearch);
+                    response.send(Http::Code::Ok, result, MIME(Application, Json));
                 }
-                BTreeManager::searchDNI(tree, dniSearch);
-                response.send(Http::Code::Ok, "Completado");
+                catch(const std::exception& e)
+                {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                }
             }
         }
         else
