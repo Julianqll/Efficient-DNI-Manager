@@ -152,7 +152,7 @@ public:
     void insert(unique_ptr<Ciudadano>&& citizen);
     Ciudadano* search(const string& dni) const;
 
-    void serialize(const string& filename) const;
+    bool serialize(const string& filename) const;
     void deserialize(const string& filename);
 
     void serialize_string_pool(ostringstream& buffer) const;
@@ -336,7 +336,7 @@ void Btree::deserialize_string_pool(istringstream& buffer) {
     }
 }
 
-void Btree::serialize(const string& filename) const {
+bool Btree::serialize(const string& filename) const {
     ostringstream buffer;
     if (root) {
         auto start = high_resolution_clock::now();
@@ -356,11 +356,14 @@ void Btree::serialize(const string& filename) const {
             file.write(compressed_data.data(), actual_compressed_size);
             file.close();
             cout << "B-Tree serialized and compressed to file successfully." << endl;
+            return true;
         } else {
             cerr << "Error opening file for serialization." << endl;
+            return false;
         }
     } else {
         cerr << "Tree is empty." << endl;
+        return false;
     }
 }
 
@@ -613,8 +616,22 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.serialize("/app/data/btreebinary.bin");
-                response.send(Http::Code::Ok, "Data guardada en archivo");
+                try
+                {
+                    bool result = tree.serialize("/app/data/btreebinary.bin");
+                    if (result)
+                    {
+                        response.send(Http::Code::Ok, R"({"result": "Datos guardada en archivo"})", MIME(Application, Json));                    
+                    }
+                    else
+                    {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al guardar el archivo"})", MIME(Application, Json));                    
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                }
             }
         }
         if (req.resource() == "/open")
