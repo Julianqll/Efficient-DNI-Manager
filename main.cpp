@@ -153,7 +153,7 @@ public:
     Ciudadano* search(const string& dni) const;
 
     bool serialize(const string& filename) const;
-    void deserialize(const string& filename);
+    bool deserialize(const string& filename);
 
     void serialize_string_pool(ostringstream& buffer) const;
     void deserialize_string_pool(istringstream& buffer);
@@ -367,7 +367,7 @@ bool Btree::serialize(const string& filename) const {
     }
 }
 
-void Btree::deserialize(const string& filename) {
+bool Btree::deserialize(const string& filename) {
     ifstream file(filename, ios::binary | ios::in);
     if (file.is_open()) {
         auto start = high_resolution_clock::now();
@@ -381,18 +381,18 @@ void Btree::deserialize(const string& filename) {
 
         size_t uncompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
         if (uncompressed_size == ZSTD_CONTENTSIZE_ERROR) {
-            cerr << "Error determining uncompressed size." << endl;
-            return;
+            cerr << "Error: No se pudo determinar su tamaño descomprimido" << endl;
+            return false;
         } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-            cerr << "Original size unknown." << endl;
-            return;
+            cerr << "Error: Peso de archivo original desconocido" << endl;
+            return false;
         }
 
         vector<char> uncompressed_data(uncompressed_size);
         size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
         if (ZSTD_isError(actual_uncompressed_size)) {
-            cerr << "Decompression error: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
-            return;
+            cerr << "Error de descompresion:" << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+            return false;
         }
 
         istringstream buffer(string(uncompressed_data.data(), actual_uncompressed_size));
@@ -402,11 +402,13 @@ void Btree::deserialize(const string& filename) {
 
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end - start);
-        cout << "B-Tree deserialized in " << duration.count() << " milliseconds." << endl;
+        cout << "B-Tree deserializado en " << duration.count() << " milisegundos." << endl;
 
         file.close();
+        return true;
     } else {
-        cerr << "Error opening file for deserialization." << endl;
+        cerr << "Error abriendo archivo para deserializacion." << endl;
+        return false;
     }
 }
 
@@ -429,7 +431,7 @@ public:
             cerr << "Error: No se pudo determinar su tamaño descomprimido" << endl;
             return false;
         } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-            cerr << "Error: Peso de archivo desconocido" << endl;
+            cerr << "Error: Peso de archivo original desconocido" << endl;
             return false;
         }
 
@@ -442,7 +444,7 @@ public:
 
         ofstream decompressed_file(decompressed_filename, ios::binary);
         if (!decompressed_file) {
-            cerr << "Error abriendo el archivo descomprimido opening para escritura" << endl;
+            cerr << "Error abriendo el archivo descomprimido para escritura" << endl;
             return false;
         }
         decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
