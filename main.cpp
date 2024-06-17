@@ -409,13 +409,13 @@ void Btree::deserialize(const string& filename) {
 
 class BTreeManager {
 public:
-    static void loadFile(const string& input_filename, Btree& tree) {
+    static bool loadFile(const string& input_filename, Btree& tree) {
         string decompressed_filename = "decompressed_data.csv";
 
         ifstream input_file(input_filename, ios::binary);
         if (!input_file) {
-            cerr << "Error opening input file." << endl;
-            exit(1);
+            cerr << "Error: No se pudo abrir el archivo" << endl;
+            return false;
         }
 
         vector<char> compressed_data((istreambuf_iterator<char>(input_file)), istreambuf_iterator<char>());
@@ -423,32 +423,32 @@ public:
 
         size_t uncompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
         if (uncompressed_size == ZSTD_CONTENTSIZE_ERROR) {
-            cerr << "Error determining uncompressed size." << endl;
-            exit(1);
+            cerr << "Error: No se pudo determinar su tamaño descomprimido" << endl;
+            return false;
         } else if (uncompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-            cerr << "Original size unknown." << endl;
-            exit(1);
+            cerr << "Error: Peso de archivo desconocido" << endl;
+            return false;
         }
 
         vector<char> uncompressed_data(uncompressed_size);
         size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
         if (ZSTD_isError(actual_uncompressed_size)) {
-            cerr << "Decompression error: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
-            exit(1);
+            cerr << "Error de descompresion:" << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+            return false;
         }
 
         ofstream decompressed_file(decompressed_filename, ios::binary);
         if (!decompressed_file) {
-            cerr << "Error opening decompressed file for writing." << endl;
-            exit(1);
+            cerr << "Error abriendo el archivo descomprimido opening para escritura" << endl;
+            return false;
         }
         decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
         decompressed_file.close();
 
         boost::iostreams::mapped_file mmap(decompressed_filename, boost::iostreams::mapped_file::readonly);
         if (!mmap.is_open()) {
-            cerr << "Error mapping decompressed file." << endl;
-            exit(1);
+            cerr << "Error mapeando el archivo descomprimido" << endl;
+            return false;
         }
 
         const char* file_data = mmap.const_data();
@@ -483,7 +483,8 @@ public:
 
         auto stop_parse = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(stop_parse - start_parse);
-        cout << "Time taken by parsing: " << duration.count() / 1000.0 << "s\n";
+        cout << "Tiempo de lectura: " << duration.count() / 1000.0 << "s\n";
+        return true;
     }
 
     static void searchDNI(const Btree& tree, const string& dniToSearch) {
@@ -590,8 +591,22 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                BTreeManager::loadFile("/app/data/data.zst", tree);
-                response.send(Http::Code::Ok, "Data descomprimida e insertada");
+                try
+                {
+                    bool result = BTreeManager::loadFile("/app/data/data.zst", tree);
+                    if (result)
+                    {
+                        response.send(Http::Code::Ok, R"({"result": "Data descomprimida e insertada"})", MIME(Application, Json));                    
+                    }
+                    else
+                    {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al cargar el archivo"})", MIME(Application, Json));                    
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                }                
             }
         }
         if (req.resource() == "/save")
