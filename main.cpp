@@ -640,8 +640,22 @@ class MyHandler : public Http::Handler
         {
             if (req.method() == Http::Method::Get)
             {
-                tree.deserialize("/app/data/btreebinary.bin");
-                response.send(Http::Code::Ok, "Data importada correctamente");
+                try
+                {
+                    bool result = tree.deserialize("/app/data/btreebinary.bin");
+                    if (result)
+                    {
+                        response.send(Http::Code::Ok, R"({"result": "Datos importados correctamente"})", MIME(Application, Json));                    
+                    }
+                    else
+                    {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error en la importacion"})", MIME(Application, Json));                    
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                }
             }
         }
         if (req.resource() == "/search")
