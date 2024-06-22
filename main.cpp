@@ -16,7 +16,6 @@
 #include <chrono>
 #include <zstd.h>
 #include <unordered_map>
-#include <boost/iostreams/device/mapped_file.hpp>
 #include <boost/spirit/include/qi.hpp>
 
 using namespace Pistache;
@@ -449,8 +448,6 @@ std::string escape_json(const std::string& input) {
 class BTreeManager {
 public:
     static bool loadFile(const string& input_filename, Btree& tree) {
-        string decompressed_filename = "decompressed_data.csv";
-
         ifstream input_file(input_filename, ios::binary);
         if (!input_file) {
             cerr << "Error: No se pudo abrir el archivo" << endl;
@@ -476,22 +473,8 @@ public:
             return false;
         }
 
-        ofstream decompressed_file(decompressed_filename, ios::binary);
-        if (!decompressed_file) {
-            cerr << "Error abriendo el archivo descomprimido para escritura" << endl;
-            return false;
-        }
-        decompressed_file.write(uncompressed_data.data(), actual_uncompressed_size);
-        decompressed_file.close();
-
-        boost::iostreams::mapped_file mmap(decompressed_filename, boost::iostreams::mapped_file::readonly);
-        if (!mmap.is_open()) {
-            cerr << "Error mapeando el archivo descomprimido" << endl;
-            return false;
-        }
-
-        const char* file_data = mmap.const_data();
-        const char* file_end = file_data + mmap.size();
+        const char* file_data = uncompressed_data.data();
+        const char* file_end = file_data + actual_uncompressed_size;
 
         auto start_parse = high_resolution_clock::now();
 
@@ -558,6 +541,7 @@ public:
         return jsonResult;
     }
 };
+
 
 Btree tree(30);
 
@@ -641,7 +625,7 @@ class MyHandler : public Http::Handler
             {
                 try
                 {
-                    bool result = BTreeManager::loadFile("/app/data/data.zst", tree);
+                    bool result = BTreeManager::loadFile("./dataFiles/data.zst", tree);
                     if (result)
                     {
                         response.send(Http::Code::Ok, R"({"result": "Data descomprimida e insertada"})", MIME(Application, Json));                    
@@ -663,7 +647,7 @@ class MyHandler : public Http::Handler
             {
                 try
                 {
-                    bool result = tree.serialize("/app/data/btreebinary.bin");
+                    bool result = tree.serialize("./dataFiles/btreebinary.bin");
                     if (result)
                     {
                         response.send(Http::Code::Ok, R"({"result": "Datos guardada en archivo"})", MIME(Application, Json));                    
@@ -685,7 +669,7 @@ class MyHandler : public Http::Handler
             {
                 try
                 {
-                    bool result = tree.deserialize("/app/data/btreebinary.bin");
+                    bool result = tree.deserialize("./dataFiles/btreebinary.bin");
                     if (result)
                     {
                         response.send(Http::Code::Ok, R"({"result": "Datos importados correctamente"})", MIME(Application, Json));                    
@@ -740,9 +724,9 @@ class MyHandler : public Http::Handler
 
 int main(int argc, char* argv[])
 {
-    Port port(5000);
+    Port port(5001);
 
-    int thr = 10;
+    int thr = 40;
 
     if (argc >= 2)
     {
