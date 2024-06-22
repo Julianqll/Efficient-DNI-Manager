@@ -42,9 +42,9 @@ def compress_file(input_filename, output_filename):
             output_file.write(compressed_data)
 
 if __name__ == "__main__":
-    num_records = 33000000  # Número de registros a generar
-    csv_filename = 'data.csv'
-    compressed_filename = 'data.zst'
+    num_records = 330  # Número de registros a generar
+    csv_filename = 'datanew.csv'
+    compressed_filename = 'datanew.zst'
 
     generate_data(num_records, csv_filename)
     compress_file(csv_filename, compressed_filename)

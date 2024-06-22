@@ -1,10 +1,4 @@
-#include <pistache/common.h>
-#include <pistache/cookie.h>
 #include <pistache/endpoint.h>
-#include <pistache/http.h>
-#include <pistache/http_headers.h>
-#include <pistache/net.h>
-#include <pistache/peer.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -12,16 +6,11 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <cassert>
-#include <chrono>
-#include <zstd.h>
 #include <unordered_map>
-#include <boost/spirit/include/qi.hpp>
+#include <zstd.h>
 
 using namespace Pistache;
 using namespace std;
-using namespace std::chrono;
-namespace qi = boost::spirit::qi;
 
 #pragma pack(1)
 
@@ -65,7 +54,7 @@ public:
     unsigned getSexo() const { return sexo; }
     unsigned getEstadoCivil() const { return estado_civil; }
 
-    void serialize(ostream& os) const {
+    void serialize(ostringstream& os) const {
         os.write(dni, 8);
         os.write(reinterpret_cast<const char*>(&nombres), sizeof(nombres));
         os.write(reinterpret_cast<const char*>(&apellidos), sizeof(apellidos));
@@ -77,7 +66,7 @@ public:
         os.put((sexo << 3) | estado_civil);
     }
 
-    static Ciudadano deserialize(istream& is) {
+    static Ciudadano deserialize(istringstream& is) {
         char dni[8];
         is.read(dni, 8);
 
@@ -113,35 +102,38 @@ public:
 };
 
 class BTreeNode {
+public:
+    BTreeNode(int t, bool leaf);
+
+    void traverse() const;
+    void splitChild(int i, BTreeNode* y);
+    void insertNonFull(unique_ptr<Ciudadano>&& citizen);
+    Ciudadano* search(const string& dni) const;
+    void remove(const string& dni);
+    void removeFromLeaf(int idx);
+    void removeFromNonLeaf(int idx);
+    Ciudadano getPredecessor(int idx);
+    Ciudadano getSuccessor(int idx);
+    void fill(int idx);
+    void borrowFromPrev(int idx);
+    void borrowFromNext(int idx);
+    void merge(int idx);
+    void serialize(ostringstream& buffer) const;
+    void deserialize(istringstream& buffer);
+
+    friend class Btree;
+
 private:
     int t;
     int n;
     bool leaf;
     vector<unique_ptr<Ciudadano>> keys;
     vector<unique_ptr<BTreeNode>> children;
-
-public:
-    BTreeNode(int _t, bool _leaf);
-
-    void traverse() const;
-    void splitChild(int i, BTreeNode* y);
-    void insertNonFull(unique_ptr<Ciudadano>&& citizen);
-    Ciudadano* search(const string& dni) const;
-
-    void serialize(ostringstream& buffer) const;
-    void deserialize(istringstream& buffer);
-    friend class Btree;
 };
 
 class Btree {
-private:
-    unique_ptr<BTreeNode> root;
-    int t;
-    unordered_map<string, uint32_t> string_pool;
-    vector<string> pool_strings;
-
 public:
-    Btree(int _t) : root(nullptr), t(_t) {}
+    Btree(int t) : t(t) { root = nullptr; }
 
     void traverse() const {
         if (root)
@@ -150,6 +142,7 @@ public:
 
     void insert(unique_ptr<Ciudadano>&& citizen);
     Ciudadano* search(const string& dni) const;
+    void remove(const string& dni);
 
     bool serialize(const string& filename) const;
     bool deserialize(const string& filename);
@@ -168,9 +161,15 @@ public:
         }
         return string_pool[str];
     }
+
+private:
+    unique_ptr<BTreeNode> root;
+    int t;
+    unordered_map<string, uint32_t> string_pool;
+    vector<string> pool_strings;
 };
 
-BTreeNode::BTreeNode(int _t, bool _leaf) : t(_t), n(0), leaf(_leaf) {
+BTreeNode::BTreeNode(int t, bool leaf) : t(t), n(0), leaf(leaf) {
     keys.resize(2 * t - 1);
     children.resize(2 * t);
 }
@@ -180,7 +179,7 @@ void BTreeNode::traverse() const {
     for (i = 0; i < n; i++) {
         if (!leaf)
             children[i]->traverse();
-        cout << keys[i]->getDni() << endl; // Just printing for demonstration
+        cout << keys[i]->getDni() << endl;
     }
     if (!leaf)
         children[i]->traverse();
@@ -211,18 +210,18 @@ void BTreeNode::insertNonFull(unique_ptr<Ciudadano>&& citizen) {
 }
 
 void BTreeNode::splitChild(int i, BTreeNode* y) {
-    unique_ptr<BTreeNode> z = make_unique<BTreeNode>(y->t, y->leaf);
-    z->n = y->t - 1;
+    auto z = make_unique<BTreeNode>(y->t, y->leaf);
+    z->n = t - 1;
 
-    for (int j = 0; j < y->t - 1; j++)
-        z->keys[j] = move(y->keys[j + y->t]);
+    for (int j = 0; j < t - 1; j++)
+        z->keys[j] = move(y->keys[j + t]);
 
     if (!y->leaf) {
-        for (int j = 0; j < y->t; j++)
-            z->children[j] = move(y->children[j + y->t]);
+        for (int j = 0; j < t; j++)
+            z->children[j] = move(y->children[j + t]);
     }
 
-    y->n = y->t - 1;
+    y->n = t - 1;
 
     for (int j = n; j >= i + 1; j--)
         children[j + 1] = move(children[j]);
@@ -232,61 +231,8 @@ void BTreeNode::splitChild(int i, BTreeNode* y) {
     for (int j = n - 1; j >= i; j--)
         keys[j + 1] = move(keys[j]);
 
-    keys[i] = move(y->keys[y->t - 1]);
+    keys[i] = move(y->keys[t - 1]);
     n++;
-}
-
-void BTreeNode::serialize(ostringstream& buffer) const {
-    buffer.write(reinterpret_cast<const char*>(&n), sizeof(int));
-    buffer.write(reinterpret_cast<const char*>(&leaf), sizeof(bool));
-    for (int i = 0; i < n; i++) {
-        keys[i]->serialize(buffer);
-        if (!leaf)
-            children[i]->serialize(buffer);
-    }
-    if (!leaf)
-        children[n]->serialize(buffer);
-}
-
-void BTreeNode::deserialize(istringstream& buffer) {
-    buffer.read(reinterpret_cast<char*>(&n), sizeof(int));
-    buffer.read(reinterpret_cast<char*>(&leaf), sizeof(bool));
-    keys.resize(2 * t - 1);
-    children.resize(2 * t);
-    for (int i = 0; i < n; i++) {
-        keys[i] = make_unique<Ciudadano>(Ciudadano::deserialize(buffer));
-        if (!leaf) {
-            children[i] = make_unique<BTreeNode>(t, leaf);
-            children[i]->deserialize(buffer);
-        }
-    }
-    if (!leaf) {
-        children[n] = make_unique<BTreeNode>(t, leaf);
-        children[n]->deserialize(buffer);
-    }
-}
-
-void Btree::insert(unique_ptr<Ciudadano>&& citizen) {
-    if (!root) {
-        root = make_unique<BTreeNode>(t, true);
-        root->keys[0] = move(citizen);
-        root->n = 1;
-    } else {
-        if (root->n == 2 * t - 1) {
-            unique_ptr<BTreeNode> s = make_unique<BTreeNode>(t, false);
-            s->children[0] = move(root);
-            s->splitChild(0, s->children[0].get());
-
-            int i = 0;
-            if (s->keys[0]->getDni() < citizen->getDni())
-                i++;
-
-            s->children[i]->insertNonFull(move(citizen));
-            root = move(s);
-        } else {
-            root->insertNonFull(move(citizen));
-        }
-    }
 }
 
 Ciudadano* BTreeNode::search(const string& dni) const {
@@ -303,12 +249,228 @@ Ciudadano* BTreeNode::search(const string& dni) const {
     return children[i]->search(dni);
 }
 
+void BTreeNode::remove(const string& dni) {
+    int idx = 0;
+    while (idx < n && keys[idx]->getDni() < dni)
+        ++idx;
+
+    if (idx < n && keys[idx]->getDni() == dni) {
+        if (leaf)
+            removeFromLeaf(idx);
+        else
+            removeFromNonLeaf(idx);
+    } else {
+        if (leaf) {
+            cout << "The key " << dni << " does not exist in the tree\n";
+            return;
+        }
+
+        bool flag = (idx == n);
+
+        if (children[idx]->n < t)
+            fill(idx);
+
+        if (flag && idx > n)
+            children[idx - 1]->remove(dni);
+        else
+            children[idx]->remove(dni);
+    }
+}
+
+void BTreeNode::removeFromLeaf(int idx) {
+    for (int i = idx + 1; i < n; ++i)
+        keys[i - 1] = move(keys[i]);
+    n--;
+}
+
+void BTreeNode::removeFromNonLeaf(int idx) {
+    Ciudadano k = *keys[idx];
+
+    if (children[idx]->n >= t) {
+        Ciudadano pred = getPredecessor(idx);
+        keys[idx] = make_unique<Ciudadano>(pred);
+        children[idx]->remove(pred.getDni());
+    } else if (children[idx + 1]->n >= t) {
+        Ciudadano succ = getSuccessor(idx);
+        keys[idx] = make_unique<Ciudadano>(succ);
+        children[idx + 1]->remove(succ.getDni());
+    } else {
+        merge(idx);
+        children[idx]->remove(k.getDni());
+    }
+}
+
+Ciudadano BTreeNode::getPredecessor(int idx) {
+    BTreeNode* cur = children[idx].get();
+    while (!cur->leaf)
+        cur = cur->children[cur->n].get();
+    return *cur->keys[cur->n - 1];
+}
+
+Ciudadano BTreeNode::getSuccessor(int idx) {
+    BTreeNode* cur = children[idx + 1].get();
+    while (!cur->leaf)
+        cur = cur->children[0].get();
+    return *cur->keys[0];
+}
+
+void BTreeNode::fill(int idx) {
+    if (idx != 0 && children[idx - 1]->n >= t)
+        borrowFromPrev(idx);
+    else if (idx != n && children[idx + 1]->n >= t)
+        borrowFromNext(idx);
+    else {
+        if (idx != n)
+            merge(idx);
+        else
+            merge(idx - 1);
+    }
+}
+
+void BTreeNode::borrowFromPrev(int idx) {
+    BTreeNode* child = children[idx].get();
+    BTreeNode* sibling = children[idx - 1].get();
+
+    for (int i = child->n - 1; i >= 0; --i)
+        child->keys[i + 1] = move(child->keys[i]);
+
+    if (!child->leaf) {
+        for (int i = child->n; i >= 0; --i)
+            child->children[i + 1] = move(child->children[i]);
+    }
+
+    child->keys[0] = move(keys[idx - 1]);
+
+    if (!leaf)
+        child->children[0] = move(sibling->children[sibling->n]);
+
+    keys[idx - 1] = move(sibling->keys[sibling->n - 1]);
+
+    child->n += 1;
+    sibling->n -= 1;
+}
+
+void BTreeNode::borrowFromNext(int idx) {
+    BTreeNode* child = children[idx].get();
+    BTreeNode* sibling = children[idx + 1].get();
+
+    child->keys[(child->n)] = move(keys[idx]);
+
+    if (!(child->leaf))
+        child->children[(child->n) + 1] = move(sibling->children[0]);
+
+    keys[idx] = move(sibling->keys[0]);
+
+    for (int i = 1; i < sibling->n; ++i)
+        sibling->keys[i - 1] = move(sibling->keys[i]);
+
+    if (!sibling->leaf) {
+        for (int i = 1; i <= sibling->n; ++i)
+            sibling->children[i - 1] = move(sibling->children[i]);
+    }
+
+    child->n += 1;
+    sibling->n -= 1;
+}
+
+void BTreeNode::merge(int idx) {
+    BTreeNode* child = children[idx].get();
+    BTreeNode* sibling = children[idx + 1].get();
+
+    child->keys[t - 1] = move(keys[idx]);
+
+    for (int i = 0; i < sibling->n; ++i)
+        child->keys[i + t] = move(sibling->keys[i]);
+
+    if (!child->leaf) {
+        for (int i = 0; i <= sibling->n; ++i)
+            child->children[i + t] = move(sibling->children[i]);
+    }
+
+    for (int i = idx + 1; i < n; ++i)
+        keys[i - 1] = move(keys[i]);
+
+    for (int i = idx + 2; i <= n; ++i)
+        children[i - 1] = move(children[i]);
+
+    child->n += sibling->n + 1;
+    n--;
+}
+
+void BTreeNode::serialize(ostringstream& buffer) const {
+    buffer.write(reinterpret_cast<const char*>(&n), sizeof(n));
+    buffer.write(reinterpret_cast<const char*>(&leaf), sizeof(leaf));
+    for (int i = 0; i < n; i++) {
+        keys[i]->serialize(buffer);
+    }
+    if (!leaf) {
+        for (int i = 0; i <= n; i++) {
+            children[i]->serialize(buffer);
+        }
+    }
+}
+
+void BTreeNode::deserialize(istringstream& buffer) {
+    buffer.read(reinterpret_cast<char*>(&n), sizeof(n));
+    buffer.read(reinterpret_cast<char*>(&leaf), sizeof(leaf));
+    keys.resize(2 * t - 1);
+    children.resize(2 * t);
+    for (int i = 0; i < n; i++) {
+        keys[i] = make_unique<Ciudadano>(Ciudadano::deserialize(buffer));
+    }
+    if (!leaf) {
+        for (int i = 0; i <= n; i++) {
+            children[i] = make_unique<BTreeNode>(t, true);
+            children[i]->deserialize(buffer);
+        }
+    }
+}
+
+void Btree::insert(unique_ptr<Ciudadano>&& citizen) {
+    if (!root) {
+        root = make_unique<BTreeNode>(t, true);
+        root->keys[0] = move(citizen);
+        root->n = 1;
+    } else {
+        if (root->n == 2 * t - 1) {
+            auto s = make_unique<BTreeNode>(t, false);
+            s->children[0] = move(root);
+            s->splitChild(0, s->children[0].get());
+
+            int i = 0;
+            if (s->keys[0]->getDni() < citizen->getDni())
+                i++;
+            s->children[i]->insertNonFull(move(citizen));
+
+            root = move(s);
+        } else {
+            root->insertNonFull(move(citizen));
+        }
+    }
+}
+
 Ciudadano* Btree::search(const string& dni) const {
     if (!root) {
         cout << "Tree is empty" << endl;
         return nullptr;
     }
     return root->search(dni);
+}
+
+void Btree::remove(const string& dni) {
+    if (!root) {
+        cout << "The tree is empty\n";
+        return;
+    }
+
+    root->remove(dni);
+
+    if (root->n == 0) {
+        if (root->leaf)
+            root = nullptr;
+        else
+            root = move(root->children[0]);
+    }
 }
 
 void Btree::serialize_string_pool(ostringstream& buffer) const {
@@ -338,11 +500,11 @@ void Btree::deserialize_string_pool(istringstream& buffer) {
 bool Btree::serialize(const string& filename) const {
     ostringstream buffer;
     if (root) {
-        auto start = high_resolution_clock::now();
+        auto start = chrono::high_resolution_clock::now();
         root->serialize(buffer);
         serialize_string_pool(buffer);
-        auto end = high_resolution_clock::now();
-        auto duration = duration_cast<milliseconds>(end - start);
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
         cout << "B-Tree serializado en buffer en " << duration.count() << " milisegundos." << endl;
 
         string uncompressed_data = buffer.str();
@@ -354,7 +516,7 @@ bool Btree::serialize(const string& filename) const {
         if (file.is_open()) {
             file.write(compressed_data.data(), actual_compressed_size);
             file.close();
-            cout << "B-Tree serializado and comprimido en archivo con exito." << endl;
+            cout << "B-Tree serializado y comprimido en archivo con exito." << endl;
             return true;
         } else {
             cerr << "Error abriendo archivo para serializacion." << endl;
@@ -369,7 +531,7 @@ bool Btree::serialize(const string& filename) const {
 bool Btree::deserialize(const string& filename) {
     ifstream file(filename, ios::binary | ios::in);
     if (file.is_open()) {
-        auto start = high_resolution_clock::now();
+        auto start = chrono::high_resolution_clock::now();
 
         file.seekg(0, ios::end);
         size_t file_size = file.tellg();
@@ -390,7 +552,7 @@ bool Btree::deserialize(const string& filename) {
         vector<char> uncompressed_data(uncompressed_size);
         size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
         if (ZSTD_isError(actual_uncompressed_size)) {
-            cerr << "Error de descompresion:" << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+            cerr << "Error de descompresion: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
             return false;
         }
 
@@ -399,8 +561,8 @@ bool Btree::deserialize(const string& filename) {
         root->deserialize(buffer);
         deserialize_string_pool(buffer);
 
-        auto end = high_resolution_clock::now();
-        auto duration = duration_cast<milliseconds>(end - start);
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
         cout << "B-Tree deserializado en " << duration.count() << " milisegundos." << endl;
 
         file.close();
@@ -469,14 +631,14 @@ public:
         vector<char> uncompressed_data(uncompressed_size);
         size_t actual_uncompressed_size = ZSTD_decompress(uncompressed_data.data(), uncompressed_size, compressed_data.data(), compressed_data.size());
         if (ZSTD_isError(actual_uncompressed_size)) {
-            cerr << "Error de descompresion:" << ZSTD_getErrorName(actual_uncompressed_size) << endl;
+            cerr << "Error de descompresion: " << ZSTD_getErrorName(actual_uncompressed_size) << endl;
             return false;
         }
 
         const char* file_data = uncompressed_data.data();
         const char* file_end = file_data + actual_uncompressed_size;
 
-        auto start_parse = high_resolution_clock::now();
+        auto start_parse = chrono::high_resolution_clock::now();
 
         while (file_data < file_end) {
             const char* line_end = std::find(file_data, file_end, '\n');
@@ -503,8 +665,8 @@ public:
             file_data = line_end + 1;
         }
 
-        auto stop_parse = high_resolution_clock::now();
-        auto duration = duration_cast<milliseconds>(stop_parse - start_parse);
+        auto stop_parse = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(stop_parse - start_parse);
         cout << "Tiempo de lectura: " << duration.count() / 1000.0 << "s\n";
         return true;
     }
@@ -542,194 +704,97 @@ public:
     }
 };
 
-
 Btree tree(30);
 
-struct LoadMonitor
-{
-    LoadMonitor(const std::shared_ptr<Http::Endpoint>& endpoint)
-        : endpoint_(endpoint)
-        , interval(std::chrono::seconds(1))
-    { }
-
-    void setInterval(std::chrono::seconds secs)
-    {
-        interval = secs;
-    }
-
-    void start()
-    {
-        shutdown_ = false;
-        thread    = std::make_unique<std::thread>([this] { run(); });
-    }
-
-    void shutdown()
-    {
-        shutdown_ = true;
-    }
-
-    ~LoadMonitor()
-    {
-        shutdown_ = true;
-        if (thread)
-            thread->join();
-    }
-
-private:
-    std::shared_ptr<Http::Endpoint> endpoint_;
-    std::unique_ptr<std::thread> thread;
-    std::chrono::seconds interval;
-
-    std::atomic<bool> shutdown_;
-
-    void run()
-    {
-        Tcp::Listener::Load old;
-        while (!shutdown_)
-        {
-            if (!endpoint_->isBound())
-                continue;
-
-            endpoint_->requestLoad(old).then([&](const Tcp::Listener::Load& load) {
-                old = load;
-
-                double global = load.global;
-                if (global > 100)
-                    global = 100;
-
-                if (global > 1)
-                    std::cout << "Global load is " << global << "%" << std::endl;
-                else
-                    std::cout << "Global load is 0%" << std::endl;
-            },
-                                             Async::NoExcept);
-
-            std::this_thread::sleep_for(std::chrono::seconds(interval));
-        }
-    }
-};
-
-class MyHandler : public Http::Handler
-{
-
+class MyHandler : public Http::Handler {
     HTTP_PROTOTYPE(MyHandler)
 
-    void onRequest(
-        const Http::Request& req,
-        Http::ResponseWriter response) override
-    {
-
-        if (req.resource() == "/create")
-        {
-            if (req.method() == Http::Method::Get)
-            {
-                try
-                {
+    void onRequest(const Http::Request& req, Http::ResponseWriter response) override {
+        if (req.resource() == "/create") {
+            if (req.method() == Http::Method::Get) {
+                try {
                     bool result = BTreeManager::loadFile("./dataFiles/data.zst", tree);
-                    if (result)
-                    {
-                        response.send(Http::Code::Ok, R"({"result": "Data descomprimida e insertada"})", MIME(Application, Json));                    
+                    if (result) {
+                        response.send(Http::Code::Ok, R"({"result": "Data descomprimida e insertada"})", MIME(Application, Json));
+                    } else {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al cargar el archivo"})", MIME(Application, Json));
                     }
-                    else
-                    {
-                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al cargar el archivo"})", MIME(Application, Json));                    
-                    }
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
-                catch(const std::exception& e)
-                {
-                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
-                }                
             }
-        }
-        if (req.resource() == "/save")
-        {
-            if (req.method() == Http::Method::Get)
-            {
-                try
-                {
+        } else if (req.resource() == "/save") {
+            if (req.method() == Http::Method::Get) {
+                try {
                     bool result = tree.serialize("./dataFiles/btreebinary.bin");
-                    if (result)
-                    {
-                        response.send(Http::Code::Ok, R"({"result": "Datos guardada en archivo"})", MIME(Application, Json));                    
+                    if (result) {
+                        response.send(Http::Code::Ok, R"({"result": "Datos guardada en archivo"})", MIME(Application, Json));
+                    } else {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al guardar el archivo"})", MIME(Application, Json));
                     }
-                    else
-                    {
-                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al guardar el archivo"})", MIME(Application, Json));                    
-                    }
-                }
-                catch(const std::exception& e)
-                {
-                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        }
-        if (req.resource() == "/open")
-        {
-            if (req.method() == Http::Method::Get)
-            {
-                try
-                {
+        } else if (req.resource() == "/open") {
+            if (req.method() == Http::Method::Get) {
+                try {
                     bool result = tree.deserialize("./dataFiles/btreebinary.bin");
-                    if (result)
-                    {
-                        response.send(Http::Code::Ok, R"({"result": "Datos importados correctamente"})", MIME(Application, Json));                    
+                    if (result) {
+                        response.send(Http::Code::Ok, R"({"result": "Datos importados correctamente"})", MIME(Application, Json));
+                    } else {
+                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error en la importacion"})", MIME(Application, Json));
                     }
-                    else
-                    {
-                        response.send(Http::Code::Internal_Server_Error, R"({"error": "Error en la importacion"})", MIME(Application, Json));                    
-                    }
-                }
-                catch(const std::exception& e)
-                {
-                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        }
-        if (req.resource() == "/search")
-        {
-            if (req.method() == Http::Method::Get)
-            {
-                try
-                {
+        } else if (req.resource() == "/search") {
+            if (req.method() == Http::Method::Get) {
+                try {
                     string dniSearch;
                     const auto& query = req.query();
-                    if (query.get("dni").has_value())
-                    {
+                    if (query.get("dni").has_value()) {
                         dniSearch = query.get("dni").value();
                     }
                     string result = BTreeManager::searchDNI(tree, dniSearch);
                     response.send(Http::Code::Ok, result, MIME(Application, Json));
-                }
-                catch(const std::exception& e)
-                {
-                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));                
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        }
-        else
-        {
+        } else if (req.resource() == "/delete") {
+            if (req.method() == Http::Method::Get) {
+                try {
+                    string dniToDelete;
+                    const auto& query = req.query();
+                    if (query.get("dni").has_value()) {
+                        dniToDelete = query.get("dni").value();
+                    }
+                    tree.remove(dniToDelete);
+                    response.send(Http::Code::Ok, R"({"result": "DNI eliminado correctamente"})", MIME(Application, Json));
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
+                }
+            }
+        } else {
             response.send(Http::Code::Not_Found);
         }
     }
 
-    void onTimeout(
-        const Http::Request& /*req*/,
-        Http::ResponseWriter response) override
-    {
+    void onTimeout(const Http::Request& /*req*/, Http::ResponseWriter response) override {
         response
             .send(Http::Code::Request_Timeout, "Timeout")
             .then([=](ssize_t) {}, PrintException());
     }
 };
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
     Port port(5001);
 
     int thr = 40;
 
-    if (argc >= 2)
-    {
+    if (argc >= 2) {
         port = static_cast<uint16_t>(std::stol(argv[1]));
 
         if (argc == 3)
