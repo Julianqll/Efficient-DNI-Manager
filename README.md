@@ -30,3 +30,11 @@ docker run -d -p 5000:5000 -v ./dataFiles:/app/data edav-api
     Abre un archivo binario donde se haya guardado previamente el Btree y lo carga a caché
 - #### /search?dni=< dni (ejm: 00000001)> 
     Una vez se haya creado un arbol(```/create```) o abierto un archivo(```/open```) para tener un Btree en caché, se puede usar este endpoint para verificar la existencia de un registro
+- #### /delete?dni=< dni (ejm: 00000001)> 
+    Una vez se haya creado un arbol(```/create```) o abierto un archivo(```/open```) para tener un Btree en caché, se puede usar este endpoint para eliminar un registro
+- #### /add (POST)
+    Una vez se haya creado un arbol(```/create```) o abierto un archivo(```/open```) para tener un Btree en caché, se puede agregar un nuevo registro enviando una petición POST, con el siguiente **body**
+    ```
+    'Content-Type': 'text/plain'
+    33000001,Nombre,Apellido,LugarNac,Departamento,Provincia,Ciudad,Distrito,Ubicacion,987654321,correo@example.com,PE,0,1
+    ```
