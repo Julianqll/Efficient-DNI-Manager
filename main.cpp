@@ -794,15 +794,19 @@ class MyHandler : public Http::Handler {
                         fields.push_back(field);
                     }
 
-                    if (fields.size() == 10) {
+                    if (fields.size() == 14) {
                         string dni = fields[0];
                         uint32_t nombres = tree.get_pool_index(fields[1]);
                         uint32_t apellidos = tree.get_pool_index(fields[2]);
                         uint32_t lugar_nacimiento = tree.get_pool_index(fields[3]);
                         Direccion direccion = { tree.get_pool_index(fields[4]), tree.get_pool_index(fields[5]), tree.get_pool_index(fields[6]), tree.get_pool_index(fields[7]), tree.get_pool_index(fields[8]) };
-                        uint32_t correo = tree.get_pool_index(fields[9]);
+                        uint64_t telefono = stoull(fields[9]);
+                        uint32_t correo = tree.get_pool_index(fields[10]);
+                        string nacionalidad = fields[11];
+                        unsigned sexo = static_cast<unsigned>(stoi(fields[12]));
+                        unsigned estado_civil = static_cast<unsigned>(stoi(fields[13]));
 
-                        Ciudadano* newCitizen = new Ciudadano(dni.c_str(), nombres, apellidos, lugar_nacimiento, direccion, 987654321, correo, "PE", 0, 0);
+                        Ciudadano* newCitizen = new Ciudadano(dni.c_str(), nombres, apellidos, lugar_nacimiento, direccion, telefono, correo, nacionalidad.c_str(), sexo, estado_civil);
                         tree.insert(newCitizen);
 
                         response.send(Http::Code::Ok, R"({"result": "Ciudadano agregado correctamente"})", MIME(Application, Json));
@@ -827,7 +831,7 @@ class MyHandler : public Http::Handler {
 };
 
 int main(int argc, char* argv[]) {
-    Port port(5001);
+    Port port(5002);
 
     int thr = 40;
 
