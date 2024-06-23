@@ -107,7 +107,7 @@ public:
 
     void traverse() const;
     void splitChild(int i, BTreeNode* y);
-    void insertNonFull(unique_ptr<Ciudadano>&& citizen);
+    void insertNonFull(Ciudadano* citizen);
     Ciudadano* search(const string& dni) const;
     void remove(const string& dni);
     void removeFromLeaf(int idx);
@@ -127,8 +127,8 @@ private:
     int t;
     int n;
     bool leaf;
-    vector<unique_ptr<Ciudadano>> keys;
-    vector<unique_ptr<BTreeNode>> children;
+    vector<Ciudadano*> keys;
+    vector<BTreeNode*> children;
 };
 
 class Btree {
@@ -140,7 +140,7 @@ public:
             root->traverse();
     }
 
-    void insert(unique_ptr<Ciudadano>&& citizen);
+    void insert(Ciudadano* citizen);
     Ciudadano* search(const string& dni) const;
     void remove(const string& dni);
 
@@ -163,7 +163,7 @@ public:
     }
 
 private:
-    unique_ptr<BTreeNode> root;
+    BTreeNode* root;
     int t;
     unordered_map<string, uint32_t> string_pool;
     vector<string> pool_strings;
@@ -185,53 +185,53 @@ void BTreeNode::traverse() const {
         children[i]->traverse();
 }
 
-void BTreeNode::insertNonFull(unique_ptr<Ciudadano>&& citizen) {
+void BTreeNode::insertNonFull(Ciudadano* citizen) {
     int i = n - 1;
 
     if (leaf) {
         while (i >= 0 && keys[i]->getDni() > citizen->getDni()) {
-            keys[i + 1] = move(keys[i]);
+            keys[i + 1] = keys[i];
             i--;
         }
-        keys[i + 1] = move(citizen);
+        keys[i + 1] = citizen;
         n++;
     } else {
         while (i >= 0 && keys[i]->getDni() > citizen->getDni())
             i--;
 
         if (children[i + 1]->n == 2 * t - 1) {
-            splitChild(i + 1, children[i + 1].get());
+            splitChild(i + 1, children[i + 1]);
 
             if (keys[i + 1]->getDni() < citizen->getDni())
                 i++;
         }
-        children[i + 1]->insertNonFull(move(citizen));
+        children[i + 1]->insertNonFull(citizen);
     }
 }
 
 void BTreeNode::splitChild(int i, BTreeNode* y) {
-    auto z = make_unique<BTreeNode>(y->t, y->leaf);
+    BTreeNode* z = new BTreeNode(y->t, y->leaf);
     z->n = t - 1;
 
     for (int j = 0; j < t - 1; j++)
-        z->keys[j] = move(y->keys[j + t]);
+        z->keys[j] = y->keys[j + t];
 
     if (!y->leaf) {
         for (int j = 0; j < t; j++)
-            z->children[j] = move(y->children[j + t]);
+            z->children[j] = y->children[j + t];
     }
 
     y->n = t - 1;
 
     for (int j = n; j >= i + 1; j--)
-        children[j + 1] = move(children[j]);
+        children[j + 1] = children[j];
 
-    children[i + 1] = move(z);
+    children[i + 1] = z;
 
     for (int j = n - 1; j >= i; j--)
-        keys[j + 1] = move(keys[j]);
+        keys[j + 1] = keys[j];
 
-    keys[i] = move(y->keys[t - 1]);
+    keys[i] = y->keys[t - 1];
     n++;
 }
 
@@ -241,7 +241,7 @@ Ciudadano* BTreeNode::search(const string& dni) const {
         i++;
 
     if (i < n && dni == keys[i]->getDni())
-        return keys[i].get();
+        return keys[i];
 
     if (leaf)
         return nullptr;
@@ -279,38 +279,39 @@ void BTreeNode::remove(const string& dni) {
 
 void BTreeNode::removeFromLeaf(int idx) {
     for (int i = idx + 1; i < n; ++i)
-        keys[i - 1] = move(keys[i]);
+        keys[i - 1] = keys[i];
     n--;
 }
 
 void BTreeNode::removeFromNonLeaf(int idx) {
-    Ciudadano k = *keys[idx];
+    Ciudadano* k = keys[idx];
 
     if (children[idx]->n >= t) {
         Ciudadano pred = getPredecessor(idx);
-        keys[idx] = make_unique<Ciudadano>(pred);
+        keys[idx] = new Ciudadano(pred);
         children[idx]->remove(pred.getDni());
     } else if (children[idx + 1]->n >= t) {
         Ciudadano succ = getSuccessor(idx);
-        keys[idx] = make_unique<Ciudadano>(succ);
+        keys[idx] = new Ciudadano(succ);
         children[idx + 1]->remove(succ.getDni());
     } else {
         merge(idx);
-        children[idx]->remove(k.getDni());
+        children[idx]->remove(k->getDni());
     }
+    delete k;
 }
 
 Ciudadano BTreeNode::getPredecessor(int idx) {
-    BTreeNode* cur = children[idx].get();
+    BTreeNode* cur = children[idx];
     while (!cur->leaf)
-        cur = cur->children[cur->n].get();
+        cur = cur->children[cur->n];
     return *cur->keys[cur->n - 1];
 }
 
 Ciudadano BTreeNode::getSuccessor(int idx) {
-    BTreeNode* cur = children[idx + 1].get();
+    BTreeNode* cur = children[idx + 1];
     while (!cur->leaf)
-        cur = cur->children[0].get();
+        cur = cur->children[0];
     return *cur->keys[0];
 }
 
@@ -328,45 +329,45 @@ void BTreeNode::fill(int idx) {
 }
 
 void BTreeNode::borrowFromPrev(int idx) {
-    BTreeNode* child = children[idx].get();
-    BTreeNode* sibling = children[idx - 1].get();
+    BTreeNode* child = children[idx];
+    BTreeNode* sibling = children[idx - 1];
 
     for (int i = child->n - 1; i >= 0; --i)
-        child->keys[i + 1] = move(child->keys[i]);
+        child->keys[i + 1] = child->keys[i];
 
     if (!child->leaf) {
         for (int i = child->n; i >= 0; --i)
-            child->children[i + 1] = move(child->children[i]);
+            child->children[i + 1] = child->children[i];
     }
 
-    child->keys[0] = move(keys[idx - 1]);
+    child->keys[0] = keys[idx - 1];
 
     if (!leaf)
-        child->children[0] = move(sibling->children[sibling->n]);
+        child->children[0] = sibling->children[sibling->n];
 
-    keys[idx - 1] = move(sibling->keys[sibling->n - 1]);
+    keys[idx - 1] = sibling->keys[sibling->n - 1];
 
     child->n += 1;
     sibling->n -= 1;
 }
 
 void BTreeNode::borrowFromNext(int idx) {
-    BTreeNode* child = children[idx].get();
-    BTreeNode* sibling = children[idx + 1].get();
+    BTreeNode* child = children[idx];
+    BTreeNode* sibling = children[idx + 1];
 
-    child->keys[(child->n)] = move(keys[idx]);
+    child->keys[(child->n)] = keys[idx];
 
     if (!(child->leaf))
-        child->children[(child->n) + 1] = move(sibling->children[0]);
+        child->children[(child->n) + 1] = sibling->children[0];
 
-    keys[idx] = move(sibling->keys[0]);
+    keys[idx] = sibling->keys[0];
 
     for (int i = 1; i < sibling->n; ++i)
-        sibling->keys[i - 1] = move(sibling->keys[i]);
+        sibling->keys[i - 1] = sibling->keys[i];
 
     if (!sibling->leaf) {
         for (int i = 1; i <= sibling->n; ++i)
-            sibling->children[i - 1] = move(sibling->children[i]);
+            sibling->children[i - 1] = sibling->children[i];
     }
 
     child->n += 1;
@@ -374,27 +375,29 @@ void BTreeNode::borrowFromNext(int idx) {
 }
 
 void BTreeNode::merge(int idx) {
-    BTreeNode* child = children[idx].get();
-    BTreeNode* sibling = children[idx + 1].get();
+    BTreeNode* child = children[idx];
+    BTreeNode* sibling = children[idx + 1];
 
-    child->keys[t - 1] = move(keys[idx]);
+    child->keys[t - 1] = keys[idx];
 
     for (int i = 0; i < sibling->n; ++i)
-        child->keys[i + t] = move(sibling->keys[i]);
+        child->keys[i + t] = sibling->keys[i];
 
     if (!child->leaf) {
         for (int i = 0; i <= sibling->n; ++i)
-            child->children[i + t] = move(sibling->children[i]);
+            child->children[i + t] = sibling->children[i];
     }
 
     for (int i = idx + 1; i < n; ++i)
-        keys[i - 1] = move(keys[i]);
+        keys[i - 1] = keys[i];
 
     for (int i = idx + 2; i <= n; ++i)
-        children[i - 1] = move(children[i]);
+        children[i - 1] = children[i];
 
     child->n += sibling->n + 1;
     n--;
+
+    delete sibling;
 }
 
 void BTreeNode::serialize(ostringstream& buffer) const {
@@ -416,35 +419,35 @@ void BTreeNode::deserialize(istringstream& buffer) {
     keys.resize(2 * t - 1);
     children.resize(2 * t);
     for (int i = 0; i < n; i++) {
-        keys[i] = make_unique<Ciudadano>(Ciudadano::deserialize(buffer));
+        keys[i] = new Ciudadano(Ciudadano::deserialize(buffer));
     }
     if (!leaf) {
         for (int i = 0; i <= n; i++) {
-            children[i] = make_unique<BTreeNode>(t, true);
+            children[i] = new BTreeNode(t, true);
             children[i]->deserialize(buffer);
         }
     }
 }
 
-void Btree::insert(unique_ptr<Ciudadano>&& citizen) {
+void Btree::insert(Ciudadano* citizen) {
     if (!root) {
-        root = make_unique<BTreeNode>(t, true);
-        root->keys[0] = move(citizen);
+        root = new BTreeNode(t, true);
+        root->keys[0] = citizen;
         root->n = 1;
     } else {
         if (root->n == 2 * t - 1) {
-            auto s = make_unique<BTreeNode>(t, false);
-            s->children[0] = move(root);
-            s->splitChild(0, s->children[0].get());
+            BTreeNode* s = new BTreeNode(t, false);
+            s->children[0] = root;
+            s->splitChild(0, root);
 
             int i = 0;
             if (s->keys[0]->getDni() < citizen->getDni())
                 i++;
-            s->children[i]->insertNonFull(move(citizen));
+            s->children[i]->insertNonFull(citizen);
 
-            root = move(s);
+            root = s;
         } else {
-            root->insertNonFull(move(citizen));
+            root->insertNonFull(citizen);
         }
     }
 }
@@ -466,10 +469,12 @@ void Btree::remove(const string& dni) {
     root->remove(dni);
 
     if (root->n == 0) {
+        BTreeNode* tmp = root;
         if (root->leaf)
             root = nullptr;
         else
-            root = move(root->children[0]);
+            root = root->children[0];
+        delete tmp;
     }
 }
 
@@ -557,7 +562,7 @@ bool Btree::deserialize(const string& filename) {
         }
 
         istringstream buffer(string(uncompressed_data.data(), actual_uncompressed_size));
-        root = make_unique<BTreeNode>(t, true);
+        root = new BTreeNode(t, true);
         root->deserialize(buffer);
         deserialize_string_pool(buffer);
 
@@ -659,7 +664,7 @@ public:
                 Direccion direccion = { tree.get_pool_index(fields[4]), tree.get_pool_index(fields[5]), tree.get_pool_index(fields[6]), tree.get_pool_index(fields[7]), tree.get_pool_index(fields[8]) };
                 string correo = fields[9];
 
-                tree.insert(make_unique<Ciudadano>(dni.c_str(), tree.get_pool_index(nombres), tree.get_pool_index(apellidos), tree.get_pool_index(lugar_nacimiento), direccion, 987654321, tree.get_pool_index(correo), "PE", 0, 0));
+                tree.insert(new Ciudadano(dni.c_str(), tree.get_pool_index(nombres), tree.get_pool_index(apellidos), tree.get_pool_index(lugar_nacimiento), direccion, 987654321, tree.get_pool_index(correo), "PE", 0, 0));
             }
 
             file_data = line_end + 1;
