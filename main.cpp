@@ -782,7 +782,39 @@ class MyHandler : public Http::Handler {
                     response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        } else {
+        } else if (req.resource() == "/add") {
+            if (req.method() == Http::Method::Post) {
+                try {
+                    auto body = req.body();
+                    istringstream ss(body);
+                    string field;
+                    vector<string> fields;
+
+                    while (getline(ss, field, ',')) {
+                        fields.push_back(field);
+                    }
+
+                    if (fields.size() == 10) {
+                        string dni = fields[0];
+                        uint32_t nombres = tree.get_pool_index(fields[1]);
+                        uint32_t apellidos = tree.get_pool_index(fields[2]);
+                        uint32_t lugar_nacimiento = tree.get_pool_index(fields[3]);
+                        Direccion direccion = { tree.get_pool_index(fields[4]), tree.get_pool_index(fields[5]), tree.get_pool_index(fields[6]), tree.get_pool_index(fields[7]), tree.get_pool_index(fields[8]) };
+                        uint32_t correo = tree.get_pool_index(fields[9]);
+
+                        Ciudadano* newCitizen = new Ciudadano(dni.c_str(), nombres, apellidos, lugar_nacimiento, direccion, 987654321, correo, "PE", 0, 0);
+                        tree.insert(newCitizen);
+
+                        response.send(Http::Code::Ok, R"({"result": "Ciudadano agregado correctamente"})", MIME(Application, Json));
+                    } else {
+                        response.send(Http::Code::Bad_Request, R"({"error": "Formato de entrada incorrecto"})", MIME(Application, Json));
+                    }
+                } catch (const std::exception& e) {
+                    response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
+                }
+            }
+        }
+        else {
             response.send(Http::Code::Not_Found);
         }
     }
