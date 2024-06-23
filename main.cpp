@@ -716,9 +716,11 @@ class MyHandler : public Http::Handler {
 
     void onRequest(const Http::Request& req, Http::ResponseWriter response) override {
         if (req.resource() == "/create") {
-            if (req.method() == Http::Method::Get) {
+            if (req.method() == Http::Method::Post) {
                 try {
-                    bool result = BTreeManager::loadFile("./dataFiles/data.zst", tree);
+                    auto body = req.body();
+                    string path = body; // Leer el path directamente del cuerpo de la solicitud
+                    bool result = BTreeManager::loadFile(path, tree);
                     if (result) {
                         response.send(Http::Code::Ok, R"({"result": "Data descomprimida e insertada"})", MIME(Application, Json));
                     } else {
@@ -728,12 +730,15 @@ class MyHandler : public Http::Handler {
                     response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        } else if (req.resource() == "/save") {
-            if (req.method() == Http::Method::Get) {
+        } else  if (req.resource() == "/save") {
+            if (req.method() == Http::Method::Post) {
                 try {
-                    bool result = tree.serialize("./dataFiles/btreebinary.bin");
+                    auto body = req.body();
+                    string path = body; // Leer el path directamente del cuerpo de la solicitud
+
+                    bool result = tree.serialize(path);
                     if (result) {
-                        response.send(Http::Code::Ok, R"({"result": "Datos guardada en archivo"})", MIME(Application, Json));
+                        response.send(Http::Code::Ok, R"({"result": "Datos guardados en archivo"})", MIME(Application, Json));
                     } else {
                         response.send(Http::Code::Internal_Server_Error, R"({"error": "Error al guardar el archivo"})", MIME(Application, Json));
                     }
@@ -741,10 +746,13 @@ class MyHandler : public Http::Handler {
                     response.send(Http::Code::Internal_Server_Error, R"({"error": "Excepción: )" + std::string(e.what()) + R"("})", MIME(Application, Json));
                 }
             }
-        } else if (req.resource() == "/open") {
-            if (req.method() == Http::Method::Get) {
+        }
+        else if (req.resource() == "/open") {
+            if (req.method() == Http::Method::Post) {
                 try {
-                    bool result = tree.deserialize("./dataFiles/btreebinary.bin");
+                    auto body = req.body();
+                    string path = body; // Leer el path directamente del cuerpo de la solicitud
+                    bool result = tree.deserialize(path);
                     if (result) {
                         response.send(Http::Code::Ok, R"({"result": "Datos importados correctamente"})", MIME(Application, Json));
                     } else {
