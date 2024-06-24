@@ -709,12 +709,26 @@ public:
     }
 };
 
-Btree tree(30);
+Btree tree(33000);
 
 class MyHandler : public Http::Handler {
     HTTP_PROTOTYPE(MyHandler)
 
     void onRequest(const Http::Request& req, Http::ResponseWriter response) override {
+
+        //cors  headers
+        response.headers()
+            .add<Http::Header::AccessControlAllowOrigin>("*")
+            .add<Http::Header::AccessControlAllowMethods>("GET, POST, OPTIONS")
+            .add<Http::Header::AccessControlAllowHeaders>("Content-Type");
+
+        //preflight requests
+        if (req.method() == Http::Method::Options)
+        {
+            response.send(Http::Code::Ok);
+            return;
+        }
+
         if (req.resource() == "/create") {
             if (req.method() == Http::Method::Post) {
                 try {
@@ -839,7 +853,7 @@ class MyHandler : public Http::Handler {
 };
 
 int main(int argc, char* argv[]) {
-    Port port(5002);
+    Port port(5000);
 
     int thr = 40;
 

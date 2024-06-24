@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  edav-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: edav-api
+    ports:
+      - "5000:5000"
+    volumes:
+      - /c/:/mnt/c/
+    restart: unless-stopped
